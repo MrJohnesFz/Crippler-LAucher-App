@@ -14,6 +14,8 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
+      with:
+        lfs: true
 
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -21,11 +23,43 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+    - name: (Optional) Grant execute permission for gradlew
+      run: chmod +x gradlew || true
 
-    - name: Build with Gradle
-      run: ./gradlew assembleDebug
+    - name: Install Gradle (via SDKMAN) and build
+      shell: bash -l {0}
+      run: |
+        set -euo pipefail
+
+        # Try to parse the desired Gradle version from the wrapper properties (if present)
+        GRADLE_VERSION=""
+        if [ -f gradle/wrapper/gradle-wrapper.properties ]; then
+          DIST_URL=$(grep '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties | cut -d'=' -f2- || true)
+          echo "Found distributionUrl: $DIST_URL"
+          GRADLE_VERSION=$(echo "$DIST_URL" | sed -E 's#.*/gradle-([0-9]+(\.[0-9]+){0,2})-.*#\1#' || true)
+          echo "Parsed desired Gradle version: $GRADLE_VERSION"
+        else
+          echo "gradle-wrapper.properties not found — will install latest Gradle"
+        fi
+
+        # Install SDKMAN (non-interactive) and use it to install the requested Gradle version (or latest)
+        curl -s "https://get.sdkman.io" | bash
+        # shellcheck disable=SC1090
+        source "$HOME/.sdkman/bin/sdkman-init.sh"
+
+        if [ -n "$GRADLE_VERSION" ]; then
+          echo "Installing Gradle $GRADLE_VERSION via SDKMAN"
+          sdk install gradle "$GRADLE_VERSION" || sdk install gradle
+        else
+          echo "Installing latest Gradle via SDKMAN"
+          sdk install gradle
+        fi
+
+        echo "Gradle installed:"
+        gradle --version
+
+        # Run the build using the installed Gradle (not the wrapper)
+        gradle assembleDebug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
